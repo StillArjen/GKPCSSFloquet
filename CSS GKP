@@ -1,0 +1,165 @@
+import math
+from dataclasses import dataclass
+from typing import Dict, Tuple, List, Set
+import stim
+import pymatching
+import networkx as nx
+import time
+import csv
+import matplotlib.pyplot as plt
+
+# Color constants for clarity
+RED, GREEN, BLUE = 0, 1, 2
+
+# Define the edges around a hexagon centered at origin
+FIRST_EDGES: List[Tuple[complex, complex]] = [
+    (+1 - 1j, +1),  # Top right
+    (+1 + 1j, -1 + 1j),  # Bottom
+    (-1, -1 - 1j),  # Top left
+]
+SECOND_EDGES: List[Tuple[complex, complex]] = [
+    (-1 - 1j, +1 - 1j),  # Top
+    (+1, +1 + 1j),  # Bottom right
+    (-1 + 1j, -1),  # Bottom left
+]
+
+# Define the periodic boundary conditions for both directions
+def make_torus(c: complex, width: int, height: int) -> complex:
+    """Apply periodic boundary conditions to coordinate c"""
+    n_width = c.real % width
+    n_height = c.imag % height
+    return n_width + n_height * 1j
+
+def sorted_complex(qcoord: List[complex]) -> List[complex]:
+    """Sort complex coordinates by real then imaginary parts"""
+    return sorted(qcoord, key=lambda x: (x.real, x.imag))
+
+@dataclass(frozen=True)
+class Edge:
+    left: complex
+    right: complex
+
+@dataclass
+class Honeycomb_lattice:
+    width: int
+    height: int
+    hex_center: Dict[complex, int]  # Maps coordinates to colors (0=red, 1=green, 2=blue)
+    edge_color: Dict[Edge, int]  # Maps edges to their colors
+    all_edges: List[Edge]  # List of all edges in the lattice
+    q2i: Dict[complex, int]  # Maps complex coordinates to integers
+
+# Assign colors for two types of edges around a hexagon of given color
+def _edge_color_around_hex(c_hex: int) -> Tuple[int, int]:
+    """Returns the colors for first and second edge types around a hex of color c_hex"""
+    if c_hex == RED:
+        return (GREEN, BLUE)  
+    elif c_hex == GREEN:
+        return (BLUE, RED) 
+    else:  # BLUE
+        return (RED, GREEN)
+
+# Return an instance of the honeycomb lattice
+def build_lattice(distance: int) -> Honeycomb_lattice:
+    """Build a honeycomb lattice with the given distance parameter"""
+    if distance <= 0:
+        raise ValueError("Distance must be positive")
+        
+    width = 4 * distance
+    height = 6 * distance
+
+    hex_center: Dict[complex, int] = {}  # Coordinates to color mapping
+    for row in range(3 * distance):
+        for col in range(2 * distance):
+            center = row * 2j + 2 * col - 1j * (col % 2)
+            category = (-row - col % 2) % 3  # Determine hex color (0=red, 1=green, 2=blue)
+            hex_center[make_torus(center, width, height)] = category
+
+    # Create an edge, ensuring consistent orientation
+    def make_edge(a: complex, b: complex) -> Edge:
+        A, B = make_torus(a, width, height), make_torus(b, width, height)
+        # Compare both real and imaginary parts for consistent ordering
+        if (A.real, A.imag) < (B.real, B.imag):
+            return Edge(A, B)
+        else:
+            return Edge(B, A)
+    
+    edge_color: Dict[Edge, int] = {}
+    for hex, c_hex in hex_center.items():
+        (first_color, second_color) = _edge_color_around_hex(c_hex)
+        for v_1, v_2 in FIRST_EDGES:
+            edge = make_edge(hex + v_1, hex + v_2)
+            check = edge_color.get(edge, None)
+            if check is None:
+                edge_color[edge] = first_color
+            else:  # The edge has been assigned a color, then check if the color is the same
+                if check != first_color:
+                    raise ValueError(f"Conflict: edge {edge} assigned {check} vs {first_color}")
+        
+        for v_1, v_2 in SECOND_EDGES:
+            edge = make_edge(hex + v_1, hex + v_2)
+            check = edge_color.get(edge, None)
+            if check is None:
+                edge_color[edge] = second_color
+            else:
+                if check != second_color:
+                    raise ValueError(f"Conflict: edge {edge} assigned {check} vs {second_color}")
+    
+    # Create a sorted list of all edges
+    all_edges = sorted(edge_color.keys(), 
+                      key=lambda edge: (edge.left.real, edge.left.imag, edge.right.real, edge.right.imag))
+    
+    # Create a list of all qubit coordinates
+    qcoords: List[complex] = []
+    for edge in all_edges:
+        qcoords.append(make_torus(edge.left))
+        qcoords.append(make_torus(edge.right))
+    
+    # Mapping from complex coordinates to integers
+    q2i: Dict[complex, int] = {q: i for i, q in enumerate(sorted_complex(qcoords))}
+
+    return Honeycomb_lattice(width, height, hex_center, edge_color, all_edges, q2i)
+
+# Generate a single cycle, containing 6 rounds 
+def generate_cycle_circuit(distance: int, detectors: bool, cycle:int) -> stim.Circuit:
+    lattice = build_lattice(distance)
+    full_circuit = stim.Circuit()
+    
+    
+    if cycle == 1:
+        initial_rounds = List[Tuple[int, str]]= [
+        (RED, "X"), (GREEN, "Z"), (BLUE, "Z"),
+    ]
+        for color, pauli in initial_rounds:
+            initial_circuit = stim.Circuit()
+            for edge in lattice.all_edges:
+                if lattice.edge_color[edge] == color:
+                    qubit_1 = lattice.q2i[make_torus(edge.left)]
+                    qubit_2 = lattice.q2i[make_torus(edge.right)]
+                    if pauli == "X":
+                        initial_circuit.append_operation("MXX", [qubit_1, qubit_2])
+                    else:
+                        initial_circuit.append_operation("MZZ", [qubit_1, qubit_2])
+            full_circuit += initial_circuit
+    
+    regular_rounds = List[Tuple[int, str]]= [
+        (RED, "X"), (GREEN, "Z"), (BLUE, "X"),
+        (RED, "Z"), (GREEN, "X"), (BLUE, "Z")
+    ]
+    for color, pauli in regular_rounds:
+        round_circuit = stim.Circuit()
+        for edge in lattice.all_edges:
+            if lattice.edge_color[edge] == color:
+                qubit_1 = lattice.q2i[make_torus(edge.left)]
+                qubit_2 = lattice.q2i[make_torus(edge.right)]
+                if pauli == "X":
+                    round_circuit.append_operation("MXX", [qubit_1, qubit_2])
+                else:
+                    round_circuit.append_operation("MZZ", [qubit_1, qubit_2])
+        full_circuit += round_circuit
+    
+    if detectors:
+        for edge in lattice.all_edges:
+            qubit_1 = lattice.q2i[make_torus(edge.left)]
+            qubit_2 = lattice.q2i[make_torus(edge.right)]
+        # detectors are actually the product of the checks for r and r+4 parity.
+        # The measurement checks are performed one by one on the updating rule.
