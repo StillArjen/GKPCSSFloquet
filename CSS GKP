@@ -48,6 +48,7 @@ class Honeycomb_lattice:
     height: int
     hex_center: Dict[complex, int]  # Maps coordinates to colors (0=red, 1=green, 2=blue)
     edge_color: Dict[Edge, int]  # Maps edges to their colors
+    qcoords: List[complex]
     all_edges: List[Edge]  # List of all edges in the lattice
     q2i: Dict[complex, int]  # Maps complex coordinates to integers
 
@@ -64,8 +65,6 @@ def _edge_color_around_hex(hex_color: int) -> Tuple[int, int]:
 # Return an instance of the honeycomb lattice
 def build_lattice(distance: int) -> Honeycomb_lattice:
     """Build a honeycomb lattice with the given distance parameter"""
-    if distance <= 0:
-        raise ValueError("Distance must be positive")
         
     width = 4 * distance
     height = 6 * distance
@@ -76,6 +75,12 @@ def build_lattice(distance: int) -> Honeycomb_lattice:
             center = row * 2j + 2 * col - 1j * (col % 2)
             category = (-row - col % 2) % 3  # Determine hex color (0=red, 1=green, 2=blue)
             hex_center[make_torus(center, distance)] = category
+
+    qcoords: Set[complex] = set()  # Set of qubit coordinates(Using set to avoid duplicates)
+    for h in hex_center:
+        for (a, b) in FIRST_EDGES + SECOND_EDGES:
+            qcoords.add(make_torus(h + a, distance))
+            qcoords.add(make_torus(h + b, distance))
 
     # Create an edge, ensuring consistent orientation
     def make_edge(a: complex, b: complex) -> Edge:
@@ -89,6 +94,7 @@ def build_lattice(distance: int) -> Honeycomb_lattice:
     edge_color: Dict[Edge, int] = {}
     for hex_coord, hex_color in hex_center.items():
         (first_color, second_color) = _edge_color_around_hex(hex_color)
+
         for v_1, v_2 in FIRST_EDGES:
             edge = make_edge(hex_coord + v_1, hex_coord + v_2)
             check = edge_color.get(edge, None) # Check if the edge has been assigned a color. If not, return None
@@ -111,16 +117,11 @@ def build_lattice(distance: int) -> Honeycomb_lattice:
     all_edges = sorted(edge_color.keys(), 
                       key=lambda edge: (edge.left.real, edge.left.imag, edge.right.real, edge.right.imag))
     
-    # Create a list of all qubit coordinates
-    qcoords: List[complex] = []
-    for edge in all_edges:
-        qcoords.append(make_torus(edge.left, distance))
-        qcoords.append(make_torus(edge.right, distance))
     
     # Mapping from complex coordinates to integers
     q2i: Dict[complex, int] = {q: i for i, q in enumerate(sorted_complex(qcoords))}
 
-    return Honeycomb_lattice(width, height, hex_center, edge_color, all_edges, q2i)
+    return Honeycomb_lattice(width, height, hex_center, edge_color, qcoords, all_edges, q2i)
 
 # Generate a single cycle, containing 6 rounds 
 def generate_cycle_circuit(distance: int, detectors: bool, cycle: int, depolarization_error_channel: bool) -> stim.Circuit:
@@ -160,10 +161,21 @@ def generate_cycle_circuit(distance: int, detectors: bool, cycle: int, depolariz
                     round_circuit.append("MZZ", [q1, q2])
         
         round_circuits.append(round_circuit)
-    
+
+        # Multiply relevant measurements into the observable.
+        '''included_measurements = []
+        for group in edge_groups.values():
+            for pair in group:
+                a, b = pair
+                if a.real == b.real == 1:
+                    edge_key = frozenset([lattice.q2i.get(a), lattice.q2i.get(b)])
+                    included_measurements.append(stim.target_rec(measurement_times[edge_key] - current_time))
+        round_circuit.append_operation("OBSERVABLE_INCLUDE", included_measurements, 0)
+        round_circuits.append(round_circuit)'''
+
     measurements_per_cycle = current_time
     measurements_per_round = measurements_per_cycle // 6
-
+    
     if detectors:
         for round, (color, pauli) in enumerate(rounds):
             detector_circuit = stim.Circuit()
@@ -174,7 +186,7 @@ def generate_cycle_circuit(distance: int, detectors: bool, cycle: int, depolariz
             for h in relevant_hexes:
                 record_targets = []
                 # Get all edges around this hexagon
-                for (a, b) in FIRST_EDGES + SECOND_EDGES:
+                for (a, b) in SECOND_EDGES:
                     q1 = make_torus(h + a, distance)
                     q2 = make_torus(h + b, distance)
 
@@ -182,12 +194,27 @@ def generate_cycle_circuit(distance: int, detectors: bool, cycle: int, depolariz
                     q1_idx = lattice.q2i.get(q1)
                     q2_idx = lattice.q2i.get(q2)
                     
-                    edge_key1 = frozenset([q1_idx, q2_idx])
+                    edge_key = frozenset([q1_idx, q2_idx])
                         # If this edge was measured, add its time
-                    relative_index = (measurement_times[(edge_key, pauli)] - current_time) % measurements_per_cycle - measurements_per_cycle
+                    relative_index = (measurement_times[(edge_key, pauli)] - current_time)
                     # Add references to this measurement and its previous cycle equivalent
                     record_targets.append(stim.target_rec(relative_index))
-                    record_targets.append(stim.target_rec(relative_index - measurements_per_round * 4))
+                for (c, d) in FIRST_EDGES:
+                    q3 = make_torus(h + c, distance)
+                    q4 = make_torus(h + d, distance)
+                    
+                    q3_idx = lattice.q2i.get(q3)
+                    q4_idx = lattice.q2i.get(q4)
+
+                    if round >= 4:
+                        edge_key = frozenset([q3_idx, q4_idx])
+                        relative_index = measurement_times[(edge_key, pauli)] - current_time
+                        record_targets.append(stim.target_rec(relative_index))
+                    else:
+                        edge_key = frozenset([q3_idx, q4_idx])
+                        relative_index = (measurement_times[(edge_key, pauli)] - current_time) - measurements_per_cycle
+                        record_targets.append(stim.target_rec(relative_index))
+
                 detector_circuit.append_operation("DETECTOR", record_targets, [h.real, h.imag, 0])
             
             # Shift coordinates for the next temporal layer
@@ -197,7 +224,10 @@ def generate_cycle_circuit(distance: int, detectors: bool, cycle: int, depolariz
     full_circuit = stim.Circuit()
     for round_circuit in round_circuits:
         full_circuit += round_circuit
-    
+        
+    for q, i in lattice.q2i.items():
+        full_circuit.append_operation("QUBIT_COORDS", [i], [q.real, q.imag])
+
     return full_circuit
             
 
@@ -282,10 +312,11 @@ def print_2d(values: Dict[complex, any]):
         s += "\n"
     print(s)
     
-    # Print visualizations
+
 def main():
-    lattice = build_lattice(1)
-    circuit = generate_cycle_circuit(1, False, 0, False)*10 + generate_cycle_circuit(1, True, 0, False)*5
+    lattice = build_lattice(3)
+    #print(lattice.q2i)
+    circuit = generate_cycle_circuit(1, False, 0, False)*5 + generate_cycle_circuit(1, True, 0, False)*2
     print(circuit)
     error_model = circuit.detector_error_model()
     print(error_model)
