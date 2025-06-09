@@ -1,0 +1,102 @@
+circuit = stim.Circuit("""
+REPEAT 2 {
+    MXX 10 11 0 6 4 5
+    TICK
+    MXX 1 2 3 9 7 8
+    TICK
+    MZZ 0 5 1 7 6 11
+    TICK
+    MZZ 4 10 2 3 8 9
+    TICK
+    MXX 5 11 0 1 6 7
+    TICK
+    MXX 2 8 3 4 9 10
+    TICK
+    MZZ 10 11 0 6 4 5
+    TICK
+    MZZ 1 2 3 9 7 8
+    TICK
+    MXX 0 5 1 7 6 11
+    TICK
+    MXX 4 10 2 3 8 9
+    TICK
+    MZZ 5 11 0 1 6 7
+    TICK
+    MZZ 2 8 3 4 9 10
+    TICK
+    QUBIT_COORDS(1, 0) 0
+    QUBIT_COORDS(1, 1) 1
+    QUBIT_COORDS(1, 2) 2
+    QUBIT_COORDS(1, 3) 3
+    QUBIT_COORDS(1, 4) 4
+    QUBIT_COORDS(1, 5) 5
+    QUBIT_COORDS(3, 0) 6
+    QUBIT_COORDS(3, 1) 7
+    QUBIT_COORDS(3, 2) 8
+    QUBIT_COORDS(3, 3) 9
+    QUBIT_COORDS(3, 4) 10
+    QUBIT_COORDS(3, 5) 11
+}
+REPEAT 2 {
+    MXX 10 11 0 6 4 5
+    TICK
+    MXX 1 2 3 9 7 8
+    TICK
+    DETECTOR(2, 1, 0) rec[-35] rec[-31] rec[-33] rec[-58] rec[-57] rec[-59]
+    DETECTOR(0, 4, 0) rec[-32] rec[-34] rec[-36] rec[-56] rec[-60] rec[-55]
+    SHIFT_COORDS(0, 0, 1)
+    MZZ 0 5 1 7 6 11
+    TICK
+    MZZ 4 10 2 3 8 9
+    TICK
+    DETECTOR(2, 5, 0) rec[-27] rec[-28] rec[-30] rec[-54] rec[-53] rec[-52]
+    DETECTOR(0, 2, 0) rec[-29] rec[-26] rec[-25] rec[-51] rec[-50] rec[-49]
+    SHIFT_COORDS(0, 0, 1)
+    MXX 5 11 0 1 6 7
+    TICK
+    MXX 2 8 3 4 9 10
+    TICK
+    DETECTOR(0, 0, 0) rec[-24] rec[-23] rec[-22] rec[-48] rec[-47] rec[-46]
+    DETECTOR(2, 3, 0) rec[-21] rec[-19] rec[-20] rec[-43] rec[-45] rec[-44]
+    SHIFT_COORDS(0, 0, 1)
+    MZZ 10 11 0 6 4 5
+    TICK
+    MZZ 1 2 3 9 7 8
+    TICK
+    DETECTOR(2, 1, 0) rec[-17] rec[-13] rec[-15] rec[-40] rec[-39] rec[-41]
+    DETECTOR(0, 4, 0) rec[-14] rec[-16] rec[-18] rec[-38] rec[-42] rec[-37]
+    SHIFT_COORDS(0, 0, 1)
+    MXX 0 5 1 7 6 11
+    TICK
+    MXX 4 10 2 3 8 9
+    TICK
+    DETECTOR(2, 5, 0) rec[-9] rec[-10] rec[-12] rec[-36] rec[-35] rec[-34]
+    DETECTOR(0, 2, 0) rec[-11] rec[-8] rec[-7] rec[-33] rec[-32] rec[-31]
+    SHIFT_COORDS(0, 0, 1)
+    MZZ 5 11 0 1 6 7
+    TICK
+    MZZ 2 8 3 4 9 10
+    TICK
+    DETECTOR(0, 0, 0) rec[-6] rec[-5] rec[-4] rec[-30] rec[-29] rec[-28]
+    DETECTOR(2, 3, 0) rec[-3] rec[-1] rec[-2] rec[-25] rec[-27] rec[-26]
+    SHIFT_COORDS(0, 0, 1)
+    QUBIT_COORDS(1, 0) 0
+    QUBIT_COORDS(1, 1) 1
+    QUBIT_COORDS(1, 2) 2
+    QUBIT_COORDS(1, 3) 3
+    QUBIT_COORDS(1, 4) 4
+    QUBIT_COORDS(1, 5) 5
+    QUBIT_COORDS(3, 0) 6
+    QUBIT_COORDS(3, 1) 7
+    QUBIT_COORDS(3, 2) 8
+    QUBIT_COORDS(3, 3) 9
+    QUBIT_COORDS(3, 4) 10
+    QUBIT_COORDS(3, 5) 11
+}""")
+
+#circuit.diagram('timeline-svg')
+circuit.diagram(
+    "detslice-with-ops-svg",
+    tick=range(36, 46),
+    filter_coords=['D21'],
+)
